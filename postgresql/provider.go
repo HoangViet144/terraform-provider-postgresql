@@ -3,18 +3,20 @@ package postgresql
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"cloud.google.com/go/cloudsqlconn"
+	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"os"
-
-	"github.com/blang/semver"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-	"golang.org/x/oauth2/google"
-
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
+	"github.com/blang/semver"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"google.golang.org/api/oauth2/v2"
 )
 
 const (
@@ -182,6 +184,11 @@ func Provider() *schema.Provider {
 				Description:  "Specify the expected version of PostgreSQL.",
 				ValidateFunc: validateExpectedVersion,
 			},
+			"use_iam_db_auth": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
@@ -207,7 +214,7 @@ func Provider() *schema.Provider {
 			"postgresql_sequences": dataSourcePostgreSQLDatabaseSequences(),
 		},
 
-		ConfigureFunc: providerConfigure,
+		ConfigureContextFunc: providerConfigure,
 	}
 }
 
@@ -242,30 +249,6 @@ func getRDSAuthToken(region string, profile string, username string, host string
 	return token, err
 }
 
-func createGoogleCredsFileIfNeeded() error {
-	if _, err := google.FindDefaultCredentials(context.Background()); err == nil {
-		return nil
-	}
-
-	rawGoogleCredentials := os.Getenv("GOOGLE_CREDENTIALS")
-	if rawGoogleCredentials == "" {
-		return nil
-	}
-
-	tmpFile, err := os.CreateTemp("", "")
-	if err != nil {
-		return fmt.Errorf("could not create temporary file: %w", err)
-	}
-	defer tmpFile.Close()
-
-	_, err = tmpFile.WriteString(rawGoogleCredentials)
-	if err != nil {
-		return fmt.Errorf("could not write in temporary file: %w", err)
-	}
-
-	return os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", tmpFile.Name())
-}
-
 func acquireAzureOauthToken(tenantId string) (string, error) {
 	credential, err := azidentity.NewDefaultAzureCredential(
 		&azidentity.DefaultAzureCredentialOptions{TenantID: tenantId})
@@ -282,7 +265,7 @@ func acquireAzureOauthToken(tenantId string) (string, error) {
 	return token.Token, nil
 }
 
-func providerConfigure(d *schema.ResourceData) (interface{}, error) {
+func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	var sslMode string
 	if sslModeRaw, ok := d.GetOk("sslmode"); ok {
 		sslMode = sslModeRaw.(string)
@@ -298,6 +281,7 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	host := d.Get("host").(string)
 	port := d.Get("port").(int)
 	username := d.Get("username").(string)
+	useIamDbAuth := d.Get("use_iam_db_auth").(bool)
 
 	var password string
 	if d.Get("aws_rds_iam_auth").(bool) {
@@ -306,17 +290,17 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		var err error
 		password, err = getRDSAuthToken(region, profile, username, host, port)
 		if err != nil {
-			return nil, err
+			return nil, diag.Errorf("failed to create oauth2 service %v", err)
 		}
 	} else if d.Get("azure_identity_auth").(bool) {
 		tenantId := d.Get("azure_tenant_id").(string)
 		if tenantId == "" {
-			return nil, fmt.Errorf("postgresql: azure_identity_auth is enabled, azure_tenant_id must be provided also")
+			return nil, diag.Errorf("postgresql: azure_identity_auth is enabled, azure_tenant_id must be provided also")
 		}
 		var err error
 		password, err = acquireAzureOauthToken(tenantId)
 		if err != nil {
-			return nil, err
+			return nil, diag.Errorf("%v", err)
 		}
 	} else {
 		password = d.Get("password").(string)
@@ -348,9 +332,26 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		}
 	}
 
-	if config.Scheme == "gcppostgres" {
-		if err := createGoogleCredsFileIfNeeded(); err != nil {
-			return nil, err
+	if config.Scheme == "cloudsqlpostgres" {
+		var cloudsqlOption []cloudsqlconn.Option
+		if useIamDbAuth {
+			// Auth cloudsql database using IAM
+			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithIAMAuthN())
+			userInfoSvc, err := oauth2.NewService(ctx)
+			if err != nil {
+				return nil, diag.Errorf("failed to create oauth2 service %v", err)
+			}
+			info, err := userInfoSvc.Tokeninfo().Do()
+			if err != nil {
+				return nil, diag.Errorf("failed to get IAM user info %v", err)
+			}
+
+			config.Username = strings.Split(info.Email, "@")[0]
+		}
+
+		_, err := pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlOption...)
+		if err != nil {
+			return nil, diag.Errorf("failed to register driver %v", err)
 		}
 	}
 

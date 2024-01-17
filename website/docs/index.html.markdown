@@ -208,10 +208,7 @@ provider "postgresql" {
 
 ### GCP
 
-To enable GoCloud for GCP SQL, set `scheme` to `gcppostgres` and `host` to the connection name of the instance in following format: `project/region/instance` (or `project:region:instance`).
-
-For GCP, GoCloud also requires the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to be set to the service account credentials file.
-These credentials can be created here: https://console.cloud.google.com/iam-admin/serviceaccounts
+To enable GoCloud for GCP SQL, set `scheme` to `cloudsql-postgres` and `host` to the connection name of the instance in following format: `project/region/instance` (or `project:region:instance`).
 
 See also: https://cloud.google.com/docs/authentication/production
 
@@ -224,13 +221,23 @@ See also: https://cloud.google.com/docs/authentication/production
 
 ```hcl
 provider "postgresql" {
-  scheme   = "gcppostgres"
+  scheme   = "cloudsql-postgres"
   host     = "test-project/europe-west3/test-instance"
   username = "postgres"
   port     = 5432
   password = "test1234"
 
   superuser = false
+}
+```
+Use ```use_iam_db_auth``` to allow access database using IAM too instead of username, password separately
+```hcl
+provider "postgresql" {
+  scheme          = "cloudsql-postgres"
+  host            = "test-project/europe-west3/test-instance"
+  port            = 5432
+  use_iam_db_auth = true
+  superuser       = false
 }
 ```
 
@@ -257,7 +264,7 @@ resource "google_sql_user" "postgres" {
 
 
 provider "postgresql" {
-  scheme   = "gcppostgres"
+  scheme   = "cloudsql-postgres"
   host     = google_sql_database_instance.test.connection_name
   username = google_sql_user.postgres.name
   password = google_sql_user.postgres.password
