@@ -35,7 +35,7 @@ func Provider() *schema.Provider {
 				ValidateFunc: validation.StringInSlice([]string{
 					"postgres",
 					"awspostgres",
-					"gcppostgres",
+					"cloudsql-postgres",
 				}, false),
 			},
 			"host": {
