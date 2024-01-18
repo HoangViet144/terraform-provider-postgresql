@@ -3,7 +3,6 @@ package postgresql
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
@@ -31,11 +30,11 @@ func Provider() *schema.Provider {
 			"scheme": {
 				Type:     schema.TypeString,
 				Optional: true,
-				Default:  "postgres",
+				Default:  postgresql,
 				ValidateFunc: validation.StringInSlice([]string{
-					"postgres",
-					"awspostgres",
-					"cloudsql-postgres",
+					postgresql,
+					awsPostgres,
+					cloudsqlPostgres,
 				}, false),
 			},
 			"host": {
@@ -332,7 +331,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		}
 	}
 
-	if config.Scheme == "cloudsql-postgres" {
+	if config.Scheme == cloudsqlPostgres {
 		var cloudsqlOption []cloudsqlconn.Option
 		if useIamDbAuth {
 			// Auth cloudsql database using IAM
@@ -346,10 +345,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 				return nil, diag.Errorf("failed to get IAM user info %v", err)
 			}
 
-			config.Username = strings.Split(info.Email, "@")[0]
+			config.Username = info.Email
 		}
 
-		_, err := pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlOption...)
+		_, err := pgxv4.RegisterDriver(cloudsqlPostgres, cloudsqlOption...)
 		if err != nil {
 			return nil, diag.Errorf("failed to register driver %v", err)
 		}

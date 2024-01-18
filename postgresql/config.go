@@ -14,7 +14,6 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL db
 	"gocloud.dev/postgres"
 	_ "gocloud.dev/postgres/awspostgres"
-	_ "gocloud.dev/postgres/gcppostgres"
 )
 
 type featureName uint
@@ -208,7 +207,7 @@ func (c *Config) connParams() []string {
 
 	// sslmode and connect_timeout are not allowed with gocloud
 	// (TLS is provided by gocloud directly)
-	if c.Scheme == "postgres" {
+	if c.Scheme == postgresql {
 		params["sslmode"] = c.SSLMode
 		params["connect_timeout"] = strconv.Itoa(c.ConnectTimeoutSec)
 	}
@@ -238,22 +237,31 @@ func (c *Config) connParams() []string {
 
 func (c *Config) connStr(database string) string {
 	host := c.Host
-	// For GCP, support both project/region/instance and project:region:instance
-	// (The second one allows to use the output of google_sql_database_instance as host
-	if c.Scheme == "gcppostgres" {
-		host = strings.ReplaceAll(host, ":", "/")
-	}
 
-	connStr := fmt.Sprintf(
-		"%s://%s:%s@%s:%d/%s?%s",
-		c.Scheme,
-		url.PathEscape(c.Username),
-		url.PathEscape(c.Password),
-		host,
-		c.Port,
-		database,
-		strings.Join(c.connParams(), "&"),
-	)
+	connStr := ""
+	if c.Scheme == cloudsqlPostgres {
+		connStr = fmt.Sprintf(
+			"host=%s user=%s dbname=%s sslmode=disable",
+			host,
+			url.PathEscape(c.Username),
+			database,
+		)
+		if c.Password != "" {
+			connStr += fmt.Sprintf(" %s ", url.PathEscape(c.Password))
+		}
+		connStr += " " + strings.Join(c.connParams(), " ")
+	} else {
+		connStr = fmt.Sprintf(
+			"%s://%s:%s@%s:%d/%s?%s",
+			c.Scheme,
+			url.PathEscape(c.Username),
+			url.PathEscape(c.Password),
+			host,
+			c.Port,
+			database,
+			strings.Join(c.connParams(), "&"),
+		)
+	}
 
 	return connStr
 }
@@ -275,11 +283,12 @@ func (c *Client) Connect() (*DBConnection, error) {
 	dsn := c.config.connStr(c.databaseName)
 	conn, found := dbRegistry[dsn]
 	if !found {
-
 		var db *sql.DB
 		var err error
-		if c.config.Scheme == "postgres" {
+		if c.config.Scheme == postgresql {
 			db, err = sql.Open(proxyDriverName, dsn)
+		} else if c.config.Scheme == cloudsqlPostgres {
+			db, err = sql.Open(cloudsqlPostgres, dsn)
 		} else {
 			db, err = postgres.Open(context.Background(), dsn)
 		}
@@ -289,7 +298,8 @@ func (c *Client) Connect() (*DBConnection, error) {
 		}
 		if err != nil {
 			errString := strings.Replace(err.Error(), c.config.Password, "XXXX", 2)
-			return nil, fmt.Errorf("Error connecting to PostgreSQL server %s (scheme: %s): %s", c.config.Host, c.config.Scheme, errString)
+			return nil, fmt.Errorf("Error connecting to PostgreSQL server %s (scheme: %s): %s", c.config.Host,
+				c.config.Scheme, errString)
 		}
 
 		// We don't want to retain connection

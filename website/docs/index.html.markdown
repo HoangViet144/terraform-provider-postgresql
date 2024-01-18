@@ -145,7 +145,7 @@ The following arguments are supported:
 * `scheme` - (Optional) The driver to use. Valid values are:
   * `postgres`: Default value, use [`lib/pq`][libpq]
   * `awspostgres`: Use [GoCloud](#gocloud) for AWS
-  * `gcppostgres`: Use [GoCloud](#gocloud) for GCP
+  * `cloudsql-postgres`: Use [GoCloud](#gocloud) for GCP
 * `host` - (Required) The address for the postgresql server connection, see [GoCloud](#gocloud) for specific format.
 * `port` - (Optional) The port for the postgresql server connection. The default is `5432`.
 * `database` - (Optional) Database to connect to. The default is `postgres`.
