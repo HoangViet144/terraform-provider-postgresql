@@ -332,7 +332,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		}
 	}
 
-	if config.Scheme == "cloudsqlpostgres" {
+	if config.Scheme == "cloudsql-postgres" {
 		var cloudsqlOption []cloudsqlconn.Option
 		if useIamDbAuth {
 			// Auth cloudsql database using IAM
