@@ -3,6 +3,7 @@ package postgresql
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
@@ -345,7 +346,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 				return nil, diag.Errorf("failed to get IAM user info %v", err)
 			}
 
-			config.Username = info.Email
+			config.Username = strings.Split(info.Email, ".gserviceaccount.com")[0]
 		}
 
 		_, err := pgxv4.RegisterDriver(cloudsqlPostgres, cloudsqlOption...)

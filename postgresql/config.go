@@ -249,7 +249,6 @@ func (c *Config) connStr(database string) string {
 		if c.Password != "" {
 			connStr += fmt.Sprintf(" %s ", url.PathEscape(c.Password))
 		}
-		connStr += " " + strings.Join(c.connParams(), " ")
 	} else {
 		connStr = fmt.Sprintf(
 			"%s://%s:%s@%s:%d/%s?%s",
