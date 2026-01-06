@@ -32,11 +32,13 @@ func Provider() *schema.Provider {
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  postgresql,
-				ValidateFunc: validation.StringInSlice([]string{
-					postgresql,
-					awsPostgres,
-					cloudsqlPostgres,
-				}, false),
+				ValidateFunc: validation.StringInSlice(
+					[]string{
+						postgresql,
+						awsPostgres,
+						cloudsqlPostgres,
+					}, false,
+				),
 			},
 			"host": {
 				Type:        schema.TypeString,
@@ -189,6 +191,11 @@ func Provider() *schema.Provider {
 				Optional: true,
 				Default:  false,
 			},
+			"use_psc": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
@@ -251,14 +258,17 @@ func getRDSAuthToken(region string, profile string, username string, host string
 
 func acquireAzureOauthToken(tenantId string) (string, error) {
 	credential, err := azidentity.NewDefaultAzureCredential(
-		&azidentity.DefaultAzureCredentialOptions{TenantID: tenantId})
+		&azidentity.DefaultAzureCredentialOptions{TenantID: tenantId},
+	)
 	if err != nil {
 		return "", err
 	}
-	token, err := credential.GetToken(context.Background(), policy.TokenRequestOptions{
-		Scopes:   []string{"https://ossrdbms-aad.database.windows.net/.default"},
-		TenantID: tenantId,
-	})
+	token, err := credential.GetToken(
+		context.Background(), policy.TokenRequestOptions{
+			Scopes:   []string{"https://ossrdbms-aad.database.windows.net/.default"},
+			TenantID: tenantId,
+		},
+	)
 	if err != nil {
 		return "", err
 	}
@@ -282,6 +292,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	port := d.Get("port").(int)
 	username := d.Get("username").(string)
 	useIamDbAuth := d.Get("use_iam_db_auth").(bool)
+	usePsc := d.Get("use_psc").(bool)
 
 	var password string
 	if d.Get("aws_rds_iam_auth").(bool) {
@@ -347,6 +358,12 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			}
 
 			config.Username = strings.Split(info.Email, ".gserviceaccount.com")[0]
+		}
+
+		if usePsc {
+			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPSC()))
+		} else {
+			cloudsqlOption = append(cloudsqlOption, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithAutoIP()))
 		}
 
 		_, err := pgxv4.RegisterDriver(cloudsqlPostgres, cloudsqlOption...)
